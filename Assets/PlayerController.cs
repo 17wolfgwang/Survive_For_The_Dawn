@@ -1,142 +1,109 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 public class PlayerController : MonoBehaviour
 {
+    public float moveSpeed = 3f; // 기본 이동 속도
+    public float dashSpeed = 10f; // 대쉬 속도
+    public float dashDuration = 0.2f; // 대쉬 지속 시간
+    public float dashCooldown = 2f; // 대쉬 쿨타임
+    public bool canDash = true; // 대쉬 가능 여부
 
-    public float moveSpeed = 1f;
-    public float collisionOffset = 0.05f;
-    public ContactFilter2D movementFilter;
+    private Rigidbody2D rb;
+    private Vector2 moveInput;
+    private bool isDashing = false;
 
-    public SwordAttack swordAttack;
-    Vector2 movementInput;
-
-    Animator animator;
-
-    SpriteRenderer spriteRenderer;
-
-    // List<Collision2D> castCollisions = new List<Collision2D>();
-
-    Rigidbody2D rb;
-    // Start is called before the first frame update
-
-    List<RaycastHit2D> castCollisions = new List<RaycastHit2D>();
-
-    bool canMove = true;
+    private PlayerHunger playerHunger; // 포만감 관리 스크립트 참조
+    private Animator animator; // Animator 참조
 
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
+        playerHunger = GetComponent<PlayerHunger>();
         animator = GetComponent<Animator>();
-        spriteRenderer = GetComponent<SpriteRenderer>();
+
+        if (playerHunger == null)
+        {
+            Debug.LogError("PlayerHunger 스크립트가 Player 오브젝트에 연결되지 않았습니다.");
+        }
     }
 
-    private void FixedUpdate()
+    void Update()
     {
-        if (canMove)
+        // 이동 입력
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
+
+        // 대각선 입력 처리
+        if (horizontal != 0 && vertical != 0)
         {
-            // If movement input is not 0, try to move
-            if (movementInput != Vector2.zero)
+            // 둘 다 입력된 경우, 하나만 유지
+            if (Mathf.Abs(horizontal) > Mathf.Abs(vertical))
             {
-                bool success = TryMove(movementInput);
-
-                if (!success)
-                {
-                    success = TryMove(new Vector2(movementInput.x, 0));
-                }
-
-                if (!success && movementInput.y > 0)
-                {
-                    success = TryMove(new Vector2(0, movementInput.y));
-                }
-                animator.SetBool("isMoving", success);
+                vertical = 0; // 좌우 우선
             }
             else
             {
-                animator.SetBool("isMoving", false);
-            }
-
-            //Set direction of sprite to movement direction
-            if (movementInput.x < 0)
-            {
-                spriteRenderer.flipX = true;
-            }
-            else if (movementInput.x > 0)
-            {
-                spriteRenderer.flipX = false;
-
+                horizontal = 0; // 상하 우선
             }
         }
-    }
 
-    private bool TryMove(Vector2 direction)
-    {
-        if (direction != Vector2.zero)
+        moveInput = new Vector2(horizontal, vertical);
+
+        // 애니메이션 상태 업데이트
+        animator.SetBool("isMoving", moveInput != Vector2.zero && !isDashing);
+
+        // 대쉬 입력
+        if (Input.GetKeyDown(KeyCode.Space) && canDash && !isDashing && playerHunger != null)
         {
-            int count = rb.Cast(
-        direction,
-        movementFilter,
-        castCollisions,
-        moveSpeed * Time.fixedDeltaTime + collisionOffset);
-
-            if (count == 0)
+            // 포만감 확인 후 대쉬 가능 여부 결정
+            if (playerHunger.GetCurrentHunger() >= 10)
             {
-                rb.MovePosition(rb.position + direction * moveSpeed * Time.fixedDeltaTime);
-                return true;
+                StartCoroutine(Dash());
+                playerHunger.DecreaseHunger(10f); // 대쉬 시 포만감 10 감소
             }
             else
             {
-                return false;
+                Debug.Log("포만감이 부족하여 대쉬할 수 없습니다.");
             }
         }
-        else
-        {
-            return false;
-        }
-
-
-    }
-    void OnMove(InputValue movementValue)
-    {
-        movementInput = movementValue.Get<Vector2>();
-
     }
 
-    void OnFire()
+    void FixedUpdate()
     {
-        animator.SetTrigger("swordAttack");
-    }
-
-    public void SwordAttack()
-    {
-        LockMovement();
-        if (spriteRenderer.flipX == true)
+        if (!isDashing)
         {
-            swordAttack.AttackLeft();
-
-        }
-        else
-        {
-            swordAttack.AttackRight();
+            rb.velocity = moveInput * moveSpeed;
         }
     }
 
-    public void EndSwordAttack()
+    IEnumerator Dash()
     {
-        UnlockMovement();
-        swordAttack.StopAttack();
+        isDashing = true;
+        canDash = false;
+
+        // 대쉬 애니메이션 활성화
+        animator.SetBool("isDashing", true);
+
+        rb.velocity = moveInput * dashSpeed;
+
+        yield return new WaitForSeconds(dashDuration); // 대쉬 지속 시간
+
+        isDashing = false;
+        animator.SetBool("isDashing", false);
+
+        yield return new WaitForSeconds(dashCooldown); // 대쉬 쿨타임
+        canDash = true;
     }
 
-    public void LockMovement()
-    {
-        canMove = false;
 
-    }
-    public void UnlockMovement()
+    public void Death()
     {
-        canMove = true;
+        // 죽음 애니메이션 실행
+        animator.SetBool("isDead", true);
 
+        // 캐릭터 제어 중지
+        rb.velocity = Vector2.zero;
+        enabled = false; // PlayerController 스크립트 비활성화
     }
 }
